@@ -1,0 +1,123 @@
+// https://www.esp8266.com/viewtopic.php?f=12&t=21586#
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include "DHTesp.h"
+DHTesp dht;
+
+#define wifi_ssid "***"
+#define wifi_password "*****"
+// insert values above
+
+const char* thingsboardServer = "things.wyrt.co.uk";
+const int thingsboardPort = 1883; // Default MQTT port
+const char* accessToken = "****";  // insert token here
+
+#define temperature_topic "sensorDHT-1/temperature1"  //Office
+#define humidity_topic "sensorDHT-1/humidity1"
+
+char message_buff[100];
+
+long lastMsg = 0;   
+long lastRecu = 0;
+bool debug = true;  //Display log message if true (lowercase)
+   
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+void setup() {
+  WiFi.hostname("Lee_Basement-1");
+  Serial.begin(115200);     
+  setup_wifi();
+//  client.setServer(mqtt_server, 1883);
+  client.setServer(thingsboardServer, thingsboardPort);
+  dht.setup(D2, DHTesp::DHT22);
+  //pinMode(2,OUTPUT);
+}
+
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(wifi_ssid);
+
+  WiFi.begin(wifi_ssid, wifi_password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(5000);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi OK ");
+  Serial.print("=> ESP8266 IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect("ArduinoClient", accessToken, NULL)) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  // Wait a few seconds between measurements.
+  delay(60000);
+
+  // Read humidity and temperature from DHT22
+  float humidity = dht.getHumidity();
+  float tempC = dht.getTemperature();
+  float tempF = (tempC*1.8)+32;
+
+  // Check if no data is received
+  if (isnan(humidity) || isnan(tempC) || isnan(tempF)) {
+    Serial.println("No telemetry data from sensor!");
+  } else {
+    Serial.print("Humidity: ");
+    Serial.print(humidity);
+    Serial.print("%");
+
+    Serial.print("  |  "); 
+
+    Serial.print("Temperature: ");
+    Serial.print(tempC);
+    Serial.print("°C ~ ");
+    Serial.print(tempF);
+    Serial.println("°F");
+
+    // Prepare JSON payload
+    StaticJsonDocument<200> jsonBuffer;
+    JsonObject root = jsonBuffer.to<JsonObject>();
+    root["humidity"] = humidity;
+    root["TempC"] = tempC;
+    root["TempF"] = tempF;
+
+    char payload[256];
+    serializeJson(root, payload);
+
+    // Publish payload to ThingsBoard
+    if (client.publish("v1/devices/me/telemetry", payload)) {
+      Serial.println("Telemetry sent successfully");
+    } else {
+      Serial.println("Telemetry sending failed");
+    }
+  }
+}
+
+
